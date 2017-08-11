@@ -88,66 +88,73 @@ function CheckScheduleEntry ([string]$TimeRange)
     
 } 
 
-# Fetch all the VMs
-$vms =  az resource list --resource-type "Microsoft.Compute/virtualMachines" -o json | ConvertFrom-Json
+try{
+    # Fetch all the VMs
+    $vms =  az resource list --resource-type "Microsoft.Compute/virtualMachines" -o json | ConvertFrom-Json
 
-Write-Output "$($vms.Count) virtual machines found, processing entries..."
+    Write-Output "$($vms.Count) virtual machines found, processing entries..."
 
-# Iterate through them
-foreach ($vm in $vms)
-{
-    # Write-Host "Checking VM with ID "  $vm.id  " and tag "  $vm.tags 
-
-    $schedule = $null
-   
-    # Retrieve the tag which has the schedule
-    if($vm.tags -and $vm.tags.AutoShutdownSchedule)
-    {          
-        $schedule = $vm.tags.AutoShutdownSchedule
-        Write-Output "Found VM called $($vm.name) with schedule tag with value: $schedule"
-    }
-
-    # If we do not have a tag, continue with the rest
-    if($schedule -eq $null)
+    # Iterate through them
+    foreach ($vm in $vms)
     {
-        Write-Output "Skipping $($vm.Name) as it had no tag."
-        continue
-    }
+        # Write-Host "Checking VM with ID "  $vm.id  " and tag "  $vm.tags 
 
-    # Parse the ranges in the Tag value. Expects a string of comma-separated time ranges, or a single time range
-    $timeRangeList = @($schedule -split "," | foreach {$_.Trim()})
+        $schedule = $null
     
-    # Check each range against the current time to see if any schedule is matched
-    $scheduleMatched = $false
-    $matchedSchedule = $null
-    foreach($entry in $timeRangeList)
-    {
-        if((CheckScheduleEntry -TimeRange $entry) -eq $true)
-        {
-            $scheduleMatched = $true
-            $matchedSchedule = $entry
-            break
+        # Retrieve the tag which has the schedule
+        if($vm.tags -and $vm.tags.AutoShutdownSchedule)
+        {          
+            $schedule = $vm.tags.AutoShutdownSchedule
+            Write-Output "Found VM called $($vm.name) with schedule tag with value: $schedule"
         }
-    }
 
-    # Fetch current state
-    $currentState = (az vm show -d --ids $vm.id -o json | ConvertFrom-Json).powerState
+        # If we do not have a tag, continue with the rest
+        if($schedule -eq $null)
+        {
+            Write-Output "Skipping $($vm.Name) as it had no tag."
+            continue
+        }
 
-    Write-Host "Current state of $($vm.Name) is $($currentState) and the schedule is matched is $($scheduleMatched)"
+        # Parse the ranges in the Tag value. Expects a string of comma-separated time ranges, or a single time range
+        $timeRangeList = @($schedule -split "," | foreach {$_.Trim()})
+        
+        # Check each range against the current time to see if any schedule is matched
+        $scheduleMatched = $false
+        $matchedSchedule = $null
+        foreach($entry in $timeRangeList)
+        {
+            if((CheckScheduleEntry -TimeRange $entry) -eq $true)
+            {
+                $scheduleMatched = $true
+                $matchedSchedule = $entry
+                break
+            }
+        }
 
-    if($scheduleMatched -and $currentState -notmatch "running")
-    {
-        # this machine needs to be on
-        Write-Host "Turning on VM $($vm.Name)"
-        az vm start --ids $vm.id --no-wait
+        # Fetch current state
+        $currentState = (az vm show -d --ids $vm.id -o json | ConvertFrom-Json).powerState
+
+        Write-Host "Current state of $($vm.Name) is $($currentState) and the schedule is matched is $($scheduleMatched)"
+
+        if($scheduleMatched -and $currentState -notmatch "running")
+        {
+            # this machine needs to be on
+            Write-Host "Turning on VM $($vm.Name)"
+            az vm start --ids $vm.id --no-wait
+        }
+        elseif (!$scheduleMatched -and $currentState -notmatch "deallocated"){
+            # this machine needs to be turned off
+            Write-Host "Deallocating the VM $($vm.Name) to reduce cost"
+            az vm deallocate --ids $vm.id --no-wait
+        }
+        else {
+            Write-Host "No action needed for VM $($vm.Name) as it is in the correct state"
+        }
+    
     }
-    elseif (!$scheduleMatched -and $currentState -notmatch "deallocated"){
-        # this machine needs to be turned off
-        Write-Host "Deallocating the VM $($vm.Name) to reduce cost"
-        az vm deallocate --ids $vm.id --no-wait
-    }
-    else {
-        Write-Host "No action needed for VM $($vm.Name) as it is in the correct state"
-    }
- 
+}
+catch
+{
+    $errorMessage = $_.Exception.Message
+    throw "Unexpected exception: $errorMessage"
 }
