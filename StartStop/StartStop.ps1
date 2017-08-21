@@ -2,6 +2,7 @@
 # Start and stop VMs in Azure using a schedule set on the tags of the VM
 #
 
+
 # Parse the time range and do a check. Copied from the https://automys.com/library/asset/scheduled-virtual-machine-shutdown-startup-microsoft-azure runbook
 function CheckScheduleEntry ([string]$TimeRange)
 {    
